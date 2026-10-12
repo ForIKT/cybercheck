@@ -22,6 +22,8 @@
   details summary { cursor: pointer; font-weight: 700; font-size: 18px; }
   .keylist li { margin-bottom: 4px; }
   .links a { color: var(--ink); font-weight: 600; }
+  #key .tech { display: inline-block; font-size: 12px; padding: 1px 8px; border-radius: 999px; background: #EEF1F4; white-space: nowrap; }
+  #key td.when { width: 120px; }
 </style>
 </head>
 <body>
@@ -113,7 +115,7 @@
     });
 
     const sc = document.getElementById('screens');
-    const opts = [['board', 'Доска находок'], ['inject1', 'Вброс 1'], ['inject2', 'Вброс 2']];
+    const opts = [['board', 'Доска находок'], ['inject1', 'Вброс 1'], ['inject2', 'Вброс 2'], ['reports', 'Отчеты команд']];
     sc.innerHTML = opts.map(([k, l]) => `<button class="btn ghost small ${(state.screen || 'board') === k ? 'on' : ''}" data-sc="${k}">${l}</button>`).join('') +
       `<span class="muted" style="font-size:14px">На брифинге проектор показывает вводную, в финале – разгадку.</span>`;
     sc.querySelectorAll('[data-sc]').forEach(b => b.onclick = async () => { await DB.setState({ screen: b.dataset.sc }); tick(); });
@@ -162,11 +164,17 @@
 
   function renderKey() {
     const k = CASE.key;
+    const ev = e => `<tr><td class="when">${esc(U.day(e.d).s === 'Раньше' ? 'Без времени' : U.day(e.d).s)}${e.t ? ', ' + esc(e.t) : ''}</td><td>${esc(e.text)}</td><td><span class="tech">${esc(e.tech)}</span></td></tr>`;
     document.getElementById('key').innerHTML = `
-      <h3>Ответы на вопросы дела</h3><ol class="keylist">${CASE.questions.map((q, i) => `<li><b>${esc(q)}</b><br>${esc(k.questions[i])}</li>`).join('')}</ol>
-      <h3>Вброс 2</h3><p>${esc(k.inject2)}</p>
       <h3>Ключевые улики по командам</h3>
-      ${CASE.teams.map(t => `<div class="ans-team" style="--c:${t.color}"><b>Команда ${t.id}: ${esc(t.source)}</b><ul class="keylist">${k.evidence[t.id].map(e => `<li>${esc(e)}</li>`).join('')}</ul></div>`).join('')}`;
+      ${CASE.teams.map(t => `<div class="ans-team" style="--c:${t.color}"><b>Команда ${t.id}: ${esc(t.source)}</b>
+        <div class="tablebox"><table class="ev"><tbody>${k.evidence[t.id].map(ev).join('')}</tbody></table></div></div>`).join('')}
+      <h3>Ответы на вопросы этапа 2</h3><ol class="keylist">${CASE.questions.map((q, i) => `<li><b>${esc(q)}</b><br>${esc(k.questions[i])}</li>`).join('')}</ol>
+      <h3>Вброс 1</h3><p>${esc(k.inject1)}</p>
+      <h3>Вброс 2</h3><p>${esc(k.inject2)}</p>
+      <h3>Отчеты: ожидаемые ответы</h3>
+      ${CASE.teams.map(t => `<div class="ans-team" style="--c:${t.color}"><b>Команда ${t.id}: ${esc(t.source)}</b><dl>
+        ${CASE.reportFields.map(f => `<dt>${esc(f.l)}</dt><dd>${esc(k.reports[t.id][f.k])}</dd>`).join('')}</dl></div>`).join('')}`;
   }
 
   async function tick() {

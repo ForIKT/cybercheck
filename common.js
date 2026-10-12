@@ -78,7 +78,7 @@
   }
   function toMin(t) {
     const m = /^(\d{1,2}):(\d{2})$/.exec(t || '');
-    return m ? (+m[1]) * 60 + (+m[2]) : null;
+    return m && +m[1] < 24 && +m[2] < 60 ? (+m[1]) * 60 + (+m[2]) : null;
   }
   function team(id) { return window.CASE.teams.find(t => t.id === +id); }
   function when(d, t, date) {

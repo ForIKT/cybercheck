@@ -27,6 +27,12 @@
   #qr img, #qr canvas { display: block; }
   .inject.huge { font-size: 24px; max-width: 1100px; margin: 28px auto; padding: 28px 32px; }
   .inject.huge h2 { font-size: 34px; }
+  .reports { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; padding: 18px 24px; }
+  .rep { background: var(--paper); border: 1px solid var(--line); border-top: 8px solid var(--c); border-radius: 10px; padding: 14px 16px; font-size: 15px; }
+  .rep h2 { font-size: 17px; margin-bottom: 6px; }
+  .rep h3 { font-size: 13px; color: var(--muted); margin: 10px 0 2px; font-weight: 600; }
+  .rep p { margin: 0; }
+  @media (max-width: 1100px) { .reports { grid-template-columns: repeat(2, 1fr); } }
   .count { font-size: 15px; color: var(--muted); padding: 0 24px; }
 </style>
 </head>
@@ -89,21 +95,32 @@
   function final() {
     root.innerHTML = `<div class="wrap" style="padding-top:24px">
       <div class="panel"><h2 style="font-size:28px">Как все было на самом деле</h2>
-      <ol class="chain">${CASE.chain.map(s => `<li><span class="when">${esc(U.day(s.d).l)}, ${esc(s.t)}</span><div>${esc(s.text)}<span class="tech">${esc(s.tech)}</span></div></li>`).join('')}</ol></div>
+      <ol class="chain">${CASE.chain.map(s => `<li><div><span class="when">${esc(U.day(s.d).l)}, ${esc(s.t)}</span>${esc(s.text)}<span class="tech">${esc(s.tech)}</span></div></li>`).join('')}</ol></div>
       <div class="panel"><h2 style="font-size:28px">Где цепочку можно было оборвать</h2>
       <table class="ev"><tbody>${CASE.breakpoints.map(b => `<tr><td style="font-weight:600;width:28%">${esc(b[0])}</td><td>${esc(b[1])}</td></tr>`).join('')}</tbody></table></div></div>`;
+  }
+
+  let answers = [];
+  function reports() {
+    root.innerHTML = `<div class="reports">${CASE.teams.map(t => {
+      const a = answers.find(x => x.team === t.id && x.kind === 'report');
+      let r = {}; try { r = JSON.parse(a ? a.body : '{}'); } catch (e) {}
+      return `<section class="rep" style="--c:${t.color}"><h2>Команда ${t.id}: ${esc(t.source)}</h2>
+        ${a ? CASE.reportFields.map(f => `<h3>${esc(f.l)}</h3><p>${U.nl2br(r[f.k] || '–')}</p>`).join('') : '<p class="muted">Отчет еще не прислан</p>'}</section>`;
+    }).join('')}</div>`;
   }
 
   async function refresh() {
     const [s, c] = await Promise.all([U.DB.state(), U.DB.cards()]);
     state = s; cards = c || [];
+    if (state.screen === 'reports') answers = (await U.DB.answers()) || [];
     document.getElementById('stage-chip').textContent = U.stageLabel(state.stage);
     const mode = state.stage === 'brief' ? 'brief' : state.stage === 'final' ? 'final'
-      : state.screen === 'inject1' ? 'i1' : state.screen === 'inject2' ? 'i2' : 'board';
-    const sig = mode + (mode === 'board' ? JSON.stringify(cards.map(x => [x.id, x.status])) : '');
+      : state.screen === 'inject1' ? 'i1' : state.screen === 'inject2' ? 'i2' : state.screen === 'reports' ? 'rep' : 'board';
+    const sig = mode + (mode === 'board' ? JSON.stringify(cards.map(x => [x.id, x.status])) : mode === 'rep' ? JSON.stringify(answers.filter(a => a.kind === 'report').map(a => [a.team, a.body])) : '');
     if (sig === lastSig) return;
     lastSig = sig;
-    ({ brief, final, board, i1: () => inject(1), i2: () => inject(2) })[mode]();
+    ({ brief, final, board, rep: reports, i1: () => inject(1), i2: () => inject(2) })[mode]();
   }
 
   setInterval(() => {

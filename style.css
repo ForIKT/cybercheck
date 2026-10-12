@@ -191,10 +191,10 @@ dialog h2 { font-size: 20px; margin-bottom: 12px; }
 
 /* Разгадка */
 .chain { list-style: none; padding: 0; margin: 0; display: grid; gap: 10px; counter-reset: st; }
-.chain li { display: grid; grid-template-columns: 40px 110px 1fr; gap: 12px; align-items: start; background: var(--paper); border: 1px solid var(--line); border-radius: var(--radius-s); padding: 12px; }
+.chain li { display: grid; grid-template-columns: 32px 1fr; gap: 12px; align-items: start; background: var(--paper); border: 1px solid var(--line); border-radius: var(--radius-s); padding: 12px; }
 .chain li::before { counter-increment: st; content: counter(st); width: 32px; height: 32px; border-radius: 50%; background: var(--ink); color: #fff; display: grid; place-items: center; font-weight: 700; }
+.chain li .when { display: block; font-size: 14px; margin-bottom: 2px; }
 .chain .tech { display: block; font-size: 13px; color: var(--peony); font-weight: 600; margin-top: 2px; }
-@media (max-width: 600px) { .chain li { grid-template-columns: 32px 1fr; } .chain li .when { grid-column: 2; } .chain li > div:last-child { grid-column: 2; } }
 
 .net { position: fixed; left: 50%; transform: translateX(-50%); bottom: 16px; background: var(--bad); color: #fff; padding: 8px 16px; border-radius: 999px; font-size: 14px; display: none; z-index: 50; }
 .net.show { display: block; }
@@ -205,6 +205,7 @@ dialog h2 { font-size: 20px; margin-bottom: 12px; }
   .top { position: static; }
   .tabs { top: 0; }
   .seg { display: grid; grid-auto-flow: row; grid-template-columns: 1fr 1fr; width: 100%; }
+  .chip .src { display: none; }
 }
 @media (max-width: 600px) {
   .row2 { grid-template-columns: 1fr; }
@@ -212,3 +213,23 @@ dialog h2 { font-size: 20px; margin-bottom: 12px; }
   .brand { font-size: 16px; }
 }
 @media (prefers-reduced-motion: reduce) { * { transition: none !important; animation: none !important; } }
+
+/* Аккордеон писем */
+.acc { border: 1px solid var(--line); border-radius: var(--radius-s); overflow: hidden; }
+.acc-item + .acc-item { border-top: 1px solid var(--line); }
+.acc-head { width: 100%; text-align: left; border: none; background: var(--paper); padding: 10px 14px; display: grid; grid-template-columns: minmax(140px, 220px) 1fr auto; gap: 12px; align-items: baseline; }
+.acc-head:hover { background: #F5F7F9; }
+.acc-head[aria-expanded="true"] { background: #F1F4F7; box-shadow: inset 4px 0 0 var(--ink); }
+.acc-head .from { font-weight: 600; font-size: 14px; }
+.acc-head .subj { font-size: 14px; }
+.acc-head .w { font-size: 12px; color: var(--muted); white-space: nowrap; }
+.acc-body { padding: 14px 18px 18px; background: #FBFCFD; border-top: 1px dashed var(--line); }
+.acc-body .head { font-size: 14px; border-bottom: 1px solid var(--line); padding-bottom: 10px; margin-bottom: 12px; display: grid; grid-template-columns: auto 1fr; gap: 2px 12px; }
+.acc-body .head span:nth-child(odd) { color: var(--muted); }
+@media (max-width: 720px) { .acc-head { grid-template-columns: 1fr; gap: 2px; } }
+
+/* Ввод времени */
+input.clock { font-family: var(--mono); font-size: 22px; letter-spacing: 2px; text-align: center; max-width: 140px; }
+
+.tiny { text-align: right; margin: 24px 0 0; }
+.linkbtn.quiet { color: var(--muted); font-size: 12px; opacity: .7; }

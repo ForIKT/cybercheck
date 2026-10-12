@@ -17,7 +17,6 @@
     <span class="spacer"></span>
     <span class="chip" id="stage-chip">…</span>
     <span class="timer" id="timer" hidden></span>
-    <button class="linkbtn" id="change-team" hidden>Сменить команду</button>
   </div>
 </header>
 <nav class="tabs" id="tabs" hidden><div class="wrap" role="tablist" id="tablist"></div></nav>
@@ -32,10 +31,10 @@
     <h2>Новая находка</h2>
     <div class="row2">
       <label class="field"><span>День</span><select name="day" required></select></label>
-      <label class="field"><span>Время</span><input name="time" type="time" required></label>
+      <label class="field"><span>Время</span><input name="time" type="text" inputmode="numeric" maxlength="5" placeholder="чч:мм" autocomplete="off" class="clock" required></label>
     </div>
-    <label class="field"><span>Что произошло</span><textarea name="what" maxlength="300" required placeholder="Например: Даня скачал пиратскую программу"></textarea></label>
-    <label class="field"><span>Доказательство: где вы это увидели</span><textarea name="proof" maxlength="300" required placeholder="Например: журнал антивируса, понедельник 13:04"></textarea></label>
+    <label class="field"><span>Что произошло</span><textarea name="what" maxlength="300" required placeholder="Кратко: кто и что сделал"></textarea></label>
+    <label class="field"><span>Доказательство: где вы это увидели</span><textarea name="proof" maxlength="300" required placeholder="Например: какой раздел, какая запись"></textarea></label>
     <label class="field"><span>Прием мошенников или ошибка</span><select name="technique" required></select></label>
     <p class="muted" id="card-err" style="color:var(--bad)" hidden></p>
     <div class="dactions">
@@ -84,7 +83,6 @@
   function renderPicker() {
     document.getElementById('tabs').hidden = true;
     document.getElementById('fab').hidden = true;
-    document.getElementById('change-team').hidden = true;
     document.getElementById('team-chip').innerHTML = '';
     document.getElementById('injects').innerHTML = '';
     view.innerHTML = `
@@ -107,20 +105,19 @@
     });
   }
 
-  document.getElementById('change-team').onclick = () => {
-    if (!confirm('Сменить команду? Ваши находки останутся в ленте.')) return;
+  function changeTeam() {
+    if (!confirm('Сменить команду? Это нужно, только если вы выбрали не ту команду по ошибке.')) return;
     store.del(TEAM_KEY);
     teamId = null;
     renderPicker();
-  };
+  }
 
   /* ---------- Шапка и вкладки ---------- */
   function renderHeader() {
     const t = U.team(teamId);
     document.getElementById('team-chip').innerHTML =
-      `<span class="chip"><span class="sw" style="background:${t.color}"></span>Команда ${t.id}: ${esc(t.source)}</span>`;
+      `<span class="chip"><span class="sw" style="background:${t.color}"></span>Команда ${t.id}<span class="src">: ${esc(t.source)}</span></span>`;
     document.getElementById('stage-chip').textContent = U.stageLabel(state.stage);
-    document.getElementById('change-team').hidden = false;
     const canAdd = ['evidence', 'assembly', 'report'].includes(state.stage);
     document.getElementById('fab').hidden = !canAdd;
   }
@@ -165,7 +162,9 @@
       <div class="panel">
         <h2>Ваша команда: ${esc(t.source)}</h2>
         <p class="hint">${esc(how)}</p>
-      </div>`;
+      </div>
+      <p class="tiny"><button class="linkbtn quiet" id="ct">Выбрана не та команда?</button></p>`;
+    document.getElementById('ct').onclick = changeTeam;
   }
 
   /* ----- Улики по типам ----- */
@@ -211,7 +210,9 @@
           s.classList.toggle('pw-hidden', !open);
           b.textContent = open ? 'Скрыть' : 'Показать';
         });
-      }]
+      }],
+      ['pr', 'Установленные программы', el => el.innerHTML = `<div class="tablebox"><table class="ev"><thead><tr><th>Программа</th><th>Издатель</th><th>Установлена</th><th>Размер</th></tr></thead><tbody>
+        ${d.programs.map(r => `<tr><td>${esc(r.name)}</td><td>${esc(r.publisher)}</td><td class="when">${esc(r.date)}</td><td>${esc(r.size)}</td></tr>`).join('')}</tbody></table></div>`]
     ]);
   }
 
@@ -265,45 +266,58 @@
   }
 
   function logs(box, d) {
-    box.innerHTML = `
-      <div class="panel"><h2>Журнал входов за неделю</h2><div class="tablebox"><table class="ev"><thead><tr><th>Когда</th><th>Сервис</th><th>Учетная запись</th><th>Событие</th><th>Устройство</th><th>Место</th><th>IP-адрес</th></tr></thead><tbody>
-      ${d.rows.map(r => `<tr>${whenCell(r.d, r.t)}<td>${esc(r.service)}</td><td class="mono">${esc(r.account)}</td><td>${esc(r.event)}</td><td>${esc(r.device)}</td><td>${esc(r.place)}</td><td class="mono">${esc(r.ip)}</td></tr>`).join('')}
-      </tbody></table></div></div>
-      <div class="panel"><h2>Активные сеансы мессенджера Дани (на сегодня)</h2><div class="tablebox"><table class="ev"><thead><tr><th>Устройство</th><th>Место</th><th>Активен</th></tr></thead><tbody>
-      ${d.sessions.map(s => `<tr><td>${esc(s.device)}</td><td>${esc(s.place)}</td><td>${esc(s.since)}</td></tr>`).join('')}</tbody></table></div></div>
-      <div class="panel"><h2>Настройки безопасности</h2><ul>${d.settings.map(s => `<li>${esc(s)}</li>`).join('')}</ul></div>`;
+    segmented(box, [
+      ['in', 'Журнал входов', el => el.innerHTML = `<div class="tablebox"><table class="ev"><thead><tr><th>Когда</th><th>Сервис</th><th>Учетная запись</th><th>Событие</th><th>Устройство</th><th>Место</th><th>IP-адрес</th></tr></thead><tbody>
+        ${d.rows.map(r => `<tr>${whenCell(r.d, r.t)}<td>${esc(r.service)}</td><td class="mono">${esc(r.account)}</td><td>${esc(r.event)}</td><td>${esc(r.device)}</td><td>${esc(r.place)}</td><td class="mono">${esc(r.ip)}</td></tr>`).join('')}
+        </tbody></table></div>`],
+      ['crm', 'Действия в CRM', el => el.innerHTML = `<div class="tablebox"><table class="ev"><thead><tr><th>Когда</th><th>Кто</th><th>Действие</th></tr></thead><tbody>
+        ${d.crm.map(r => `<tr>${whenCell(r.d, r.t)}<td>${esc(r.who)}</td><td>${esc(r.action)}</td></tr>`).join('')}</tbody></table></div>`],
+      ['mr', 'Правила почты', el => el.innerHTML = `<p class="muted" style="margin-top:0">Автоматические правила, которые настроены в почтовых ящиках сотрудников.</p><div class="tablebox"><table class="ev"><thead><tr><th>Ящик</th><th>Правило</th><th>Создано</th></tr></thead><tbody>
+        ${d.mailrules.map(r => `<tr><td class="mono">${esc(r.account)}</td><td>${esc(r.rule)}</td><td>${esc(r.created)}</td></tr>`).join('')}</tbody></table></div>`],
+      ['ss', 'Активные сеансы', el => el.innerHTML = `<p class="muted" style="margin-top:0">Устройства, с которых сейчас открыт мессенджер сотрудников. Данные на сегодня.</p><div class="tablebox"><table class="ev"><thead><tr><th>Сотрудник</th><th>Устройство</th><th>Место</th><th>Активен</th></tr></thead><tbody>
+        ${d.sessions.map(r => `<tr><td>${esc(r.who)}</td><td>${esc(r.device)}</td><td>${esc(r.place)}</td><td>${esc(r.since)}</td></tr>`).join('')}</tbody></table></div>`],
+      ['st', 'Настройки безопасности', el => el.innerHTML = `<ul style="margin:0">${d.settings.map(x => `<li>${esc(x)}</li>`).join('')}</ul>`]
+    ]);
+  }
+
+  function accordion(el, items, headFn, bodyFn) {
+    el.innerHTML = `<div class="acc">${items.map((x, i) => `<div class="acc-item"><button class="acc-head" data-i="${i}" aria-expanded="false">${headFn(x)}</button><div class="acc-body" hidden>${bodyFn(x)}</div></div>`).join('')}</div>`;
+    el.querySelectorAll('.acc-head').forEach(b => b.onclick = () => {
+      const open = b.getAttribute('aria-expanded') === 'true';
+      el.querySelectorAll('.acc-head').forEach(o => { o.setAttribute('aria-expanded', 'false'); o.nextElementSibling.hidden = true; });
+      if (!open) { b.setAttribute('aria-expanded', 'true'); b.nextElementSibling.hidden = false; }
+    });
   }
 
   function mail(box, d) {
-    const order = d.letters.map((l, i) => i).reverse();
-    const draw = (i) => {
-      const L = d.letters[i];
-      box.innerHTML = `<div class="mail">
-        <div class="inbox">${order.map(j => { const x = d.letters[j]; return `<button data-i="${j}" aria-pressed="${j === i}">
-          <div class="from">${esc(x.name)}</div><div class="subj">${esc(x.subject)}</div><div class="w">${esc(U.when(x.d, x.t, x.date))}</div></button>`; }).join('')}</div>
-        <div class="panel letter">
-          <h2>${esc(L.subject)}</h2>
-          <div class="head">
-            <span>От</span><span><b>${esc(L.name)}</b> <span class="mono">&lt;${esc(L.from)}&gt;</span></span>
-            <span>Кому</span><span class="mono">buh@pion-pong.test</span>
-            <span>Ответить</span><span class="mono">${esc(L.from)}</span>
-            <span>Получено</span><span>${esc(U.when(L.d, L.t, L.date))}</span>
-          </div>
-          <div class="body">${U.nl2br(L.body)}</div>
-          ${L.attach.map(a => `<span class="attach">📎 ${esc(a)}</span>`).join('')}
-        </div></div>`;
-      box.querySelectorAll('[data-i]').forEach(b => b.onclick = () => draw(+b.dataset.i));
-    };
-    draw(order[0]);
+    const letterBody = (L, toLine) => `<div class="head">
+        <span>${toLine ? 'Кому' : 'От'}</span><span class="mono">${esc(toLine ? L.to : L.from)}</span>
+        <span>${toLine ? 'От' : 'Кому'}</span><span class="mono">buh@pion-pong.test</span>
+        <span>${toLine ? 'Отправлено' : 'Получено'}</span><span>${esc(U.when(L.d, L.t, L.date))}</span>
+      </div><div class="body">${U.nl2br(L.body)}</div>${L.attach.map(a => `<span class="attach">📎 ${esc(a)}</span>`).join('')}`;
+    segmented(box, [
+      ['in', 'Входящие', el => accordion(el, d.inbox.slice().reverse(),
+        L => `<span class="from">${esc(L.name)}</span><span class="subj">${esc(L.subject)}</span><span class="w">${esc(U.when(L.d, L.t, L.date))}</span>`,
+        L => letterBody(L, false))],
+      ['out', 'Отправленные', el => accordion(el, d.sent.slice().reverse(),
+        L => `<span class="from">Кому: ${esc(L.to)}</span><span class="subj">${esc(L.subject)}</span><span class="w">${esc(U.when(L.d, L.t, L.date))}</span>`,
+        L => letterBody(L, true))]
+    ]);
   }
 
   function bank(box, d) {
-    box.innerHTML = `
-      <div class="panel"><h2>Выписка по счету «Пион-Понга»</h2><div class="tablebox"><table class="ev"><thead><tr><th>Когда</th><th>Сумма, ₽</th><th>Получатель или плательщик</th><th>Счет</th><th>Назначение</th></tr></thead><tbody>
-      ${d.statement.map(r => `<tr>${whenCell(r.d, r.t, r.date)}<td class="when ${r.dir === '+' ? 'lvl-ok' : ''}">${r.dir === '+' ? '+' : '−'}${esc(r.sum)}</td><td>${esc(r.who)}</td><td class="mono">${esc(r.acc)}</td><td>${esc(r.purpose)}</td></tr>`).join('')}
-      </tbody></table></div></div>
-      <div class="panel"><h2>Переписка с банком</h2>${d.letters.map(l => `<div class="sms"><div class="muted" style="font-size:13px">${esc(l.from)}, ${esc(U.when(l.d, l.t))}</div>${esc(l.text)}</div>`).join('')}</div>
-      <div class="panel"><h2>Памятка банка: как читать номер счета</h2><ul>${d.memo.map(m => `<li>${esc(m)}</li>`).join('')}</ul></div>`;
+    segmented(box, [
+      ['out', 'Списания', el => el.innerHTML = `<div class="tablebox"><table class="ev"><thead><tr><th>Когда</th><th>Сумма, ₽</th><th>Получатель</th><th>Счет получателя</th><th>Назначение</th></tr></thead><tbody>
+        ${d.debit.map(r => `<tr>${whenCell(r.d, r.t, r.date)}<td class="when">−${esc(r.sum)}</td><td>${esc(r.who)}</td><td class="mono">${esc(r.acc)}</td><td>${esc(r.purpose)}</td></tr>`).join('')}
+        </tbody></table></div>`],
+      ['in', 'Поступления', el => el.innerHTML = `<div class="tablebox"><table class="ev"><thead><tr><th>Когда</th><th>Сумма, ₽</th><th>Плательщик</th><th>Назначение</th></tr></thead><tbody>
+        ${d.credit.map(r => `<tr>${whenCell(r.d, r.t, r.date)}<td class="when lvl-ok">+${esc(r.sum)}</td><td>${esc(r.who)}</td><td>${esc(r.purpose)}</td></tr>`).join('')}
+        </tbody></table></div>`],
+      ['tpl', 'Сохраненные получатели', el => el.innerHTML = `<div class="tablebox"><table class="ev"><thead><tr><th>Получатель</th><th>Счет</th><th>Примечание</th></tr></thead><tbody>
+        ${d.templates.map(r => `<tr><td>${esc(r.name)}</td><td class="mono">${esc(r.acc)}</td><td>${esc(r.added)}</td></tr>`).join('')}</tbody></table></div>`],
+      ['ltr', 'Переписка с банком', el => el.innerHTML = d.letters.map(l => `<div class="sms"><div class="muted" style="font-size:13px">${esc(l.from)}, ${esc(U.when(l.d, l.t))}</div>${esc(l.text)}</div>`).join('')],
+      ['memo', 'Памятка', el => el.innerHTML = `<h3 style="margin-top:0">Как читать номер счета</h3><ul>${d.memo.map(m => `<li>${esc(m)}</li>`).join('')}</ul>`]
+    ]);
   }
 
   /* ----- Лента ----- */
@@ -388,7 +402,7 @@
   function renderFinal() {
     view.innerHTML = `
       <div class="panel"><h2>Как все было на самом деле</h2>
-        <ol class="chain">${CASE.chain.map(s => `<li><span class="when">${esc(U.day(s.d).l)}, ${esc(s.t)}</span><div>${esc(s.text)}<span class="tech">${esc(s.tech)}</span></div></li>`).join('')}</ol></div>
+        <ol class="chain">${CASE.chain.map(s => `<li><div><span class="when">${esc(U.day(s.d).l)}, ${esc(s.t)}</span>${esc(s.text)}<span class="tech">${esc(s.tech)}</span></div></li>`).join('')}</ol></div>
       <div class="panel"><h2>Где цепочку можно было оборвать</h2>
         <div class="tablebox"><table class="ev"><tbody>${CASE.breakpoints.map(b => `<tr><td style="font-weight:600;width:30%">${esc(b[0])}</td><td>${esc(b[1])}</td></tr>`).join('')}</tbody></table></div></div>`;
   }
@@ -430,6 +444,10 @@
   const dlg = document.getElementById('card-dialog');
   const form = document.getElementById('card-form');
   form.elements.day.innerHTML = CASE.days.map(d => `<option value="${d.v}">${esc(d.l)}</option>`).join('');
+  form.elements.time.addEventListener('input', e => {
+    const digits = e.target.value.replace(/\D/g, '').slice(0, 4);
+    e.target.value = digits.length > 2 ? digits.slice(0, 2) + ':' + digits.slice(2) : digits;
+  });
   form.elements.technique.innerHTML = '<option value="">– выберите –</option>' + CASE.techniques.map(t => `<option>${esc(t)}</option>`).join('');
   document.getElementById('fab').onclick = () => {
     form.reset();
@@ -443,8 +461,8 @@
     const f = form.elements;
     const minutes = U.toMin(f.time.value);
     const err = document.getElementById('card-err');
-    if (minutes == null || !f.what.value.trim() || !f.proof.value.trim() || !f.technique.value) {
-      err.textContent = 'Заполните все поля: день, время, что произошло, доказательство и прием.';
+    if (minutes == null || minutes >= 1440 || !f.what.value.trim() || !f.proof.value.trim() || !f.technique.value) {
+      err.textContent = minutes == null || minutes >= 1440 ? 'Время введите цифрами в формате чч:мм, например 13:05.' : 'Заполните все поля: день, время, что произошло, доказательство и прием.';
       err.hidden = false; return;
     }
     const btn = document.getElementById('card-submit');
