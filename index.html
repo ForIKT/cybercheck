@@ -1,0 +1,496 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Дело № 148 – команда</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Golos+Text:wght@400;500;600;700&family=PT+Mono&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header class="top">
+  <div class="wrap">
+    <div class="brand"><span class="peony" aria-hidden="true"></span><span class="case">Дело № 148</span><span class="muted" style="color:#AEB7C4;font-weight:500">«Пион-Понг»</span></div>
+    <span id="team-chip"></span>
+    <span class="spacer"></span>
+    <span class="chip" id="stage-chip">…</span>
+    <span class="timer" id="timer" hidden></span>
+    <button class="linkbtn" id="change-team" hidden>Сменить команду</button>
+  </div>
+</header>
+<nav class="tabs" id="tabs" hidden><div class="wrap" role="tablist" id="tablist"></div></nav>
+<main><div class="wrap">
+  <div id="injects"></div>
+  <div id="view"><p class="empty">Загрузка…</p></div>
+</div></main>
+<button class="fab" id="fab" hidden>Добавить находку</button>
+
+<dialog id="card-dialog">
+  <form class="dbody" id="card-form" method="dialog">
+    <h2>Новая находка</h2>
+    <div class="row2">
+      <label class="field"><span>День</span><select name="day" required></select></label>
+      <label class="field"><span>Время</span><input name="time" type="time" required></label>
+    </div>
+    <label class="field"><span>Что произошло</span><textarea name="what" maxlength="300" required placeholder="Например: Даня скачал пиратскую программу"></textarea></label>
+    <label class="field"><span>Доказательство: где вы это увидели</span><textarea name="proof" maxlength="300" required placeholder="Например: журнал антивируса, понедельник 13:04"></textarea></label>
+    <label class="field"><span>Прием мошенников или ошибка</span><select name="technique" required></select></label>
+    <p class="muted" id="card-err" style="color:var(--bad)" hidden></p>
+    <div class="dactions">
+      <button class="btn ghost" type="button" id="card-cancel">Отмена</button>
+      <button class="btn peony" type="submit" id="card-submit">Добавить в ленту</button>
+    </div>
+  </form>
+</dialog>
+
+<script src="config.js"></script>
+<script src="data.js"></script>
+<script src="common.js"></script>
+<script>
+(function () {
+  if (!U.configOk()) return;
+  const CASE = window.CASE, DB = U.DB, esc = U.esc;
+  const TEAM_KEY = 'inv_team_v1';
+  const store = {
+    get(k) { try { return localStorage.getItem(k); } catch (e) { return null; } },
+    set(k, v) { try { localStorage.setItem(k, v); } catch (e) {} },
+    del(k) { try { localStorage.removeItem(k); } catch (e) {} }
+  };
+
+  let teamId = +store.get(TEAM_KEY) || null;
+  let state = null, cards = [], tab = null, lastStage = null, lastInjects = '', lastCardsSig = '';
+  const view = document.getElementById('view');
+
+  const TABS = {
+    case: 'Дело',
+    evidence: 'Наши улики',
+    feed: 'Лента дела',
+    questions: 'Вопросы дела',
+    report: 'Отчет',
+    final: 'Разгадка'
+  };
+  const TABS_BY_STAGE = {
+    brief: ['case'],
+    evidence: ['evidence', 'feed', 'case'],
+    assembly: ['questions', 'evidence', 'feed', 'case'],
+    report: ['report', 'questions', 'evidence', 'feed', 'case'],
+    final: ['final', 'feed', 'evidence', 'case']
+  };
+  const DEFAULT_TAB = { brief: 'case', evidence: 'evidence', assembly: 'questions', report: 'report', final: 'final' };
+
+  /* ---------- Выбор команды ---------- */
+  function renderPicker() {
+    document.getElementById('tabs').hidden = true;
+    document.getElementById('fab').hidden = true;
+    document.getElementById('change-team').hidden = true;
+    document.getElementById('team-chip').innerHTML = '';
+    document.getElementById('injects').innerHTML = '';
+    view.innerHTML = `
+      <div class="panel">
+        <h2>Выберите свою команду</h2>
+        <p class="muted">Номер команды назовет преподаватель. У каждой команды свой источник улик.</p>
+        <div class="teams-grid">
+          ${CASE.teams.map(t => `
+            <button class="team-pick" style="--c:${t.color}" data-team="${t.id}">
+              <b>Команда ${t.id}</b>
+              <span class="muted">${esc(t.source)}</span>
+            </button>`).join('')}
+        </div>
+      </div>`;
+    view.querySelectorAll('[data-team]').forEach(b => b.onclick = () => {
+      teamId = +b.dataset.team;
+      store.set(TEAM_KEY, String(teamId));
+      tab = null; lastStage = null; lastInjects = ''; lastCardsSig = '';
+      refresh(true);
+    });
+  }
+
+  document.getElementById('change-team').onclick = () => {
+    if (!confirm('Сменить команду? Ваши находки останутся в ленте.')) return;
+    store.del(TEAM_KEY);
+    teamId = null;
+    renderPicker();
+  };
+
+  /* ---------- Шапка и вкладки ---------- */
+  function renderHeader() {
+    const t = U.team(teamId);
+    document.getElementById('team-chip').innerHTML =
+      `<span class="chip"><span class="sw" style="background:${t.color}"></span>Команда ${t.id}: ${esc(t.source)}</span>`;
+    document.getElementById('stage-chip').textContent = U.stageLabel(state.stage);
+    document.getElementById('change-team').hidden = false;
+    const canAdd = ['evidence', 'assembly', 'report'].includes(state.stage);
+    document.getElementById('fab').hidden = !canAdd;
+  }
+
+  function renderTabs() {
+    const list = TABS_BY_STAGE[state.stage] || ['case'];
+    if (!list.includes(tab)) tab = list[0];
+    const nav = document.getElementById('tabs');
+    nav.hidden = list.length < 2;
+    document.getElementById('tablist').innerHTML = list.map(k =>
+      `<button class="tab" role="tab" data-tab="${k}" aria-selected="${k === tab}">${TABS[k]}</button>`).join('');
+    nav.querySelectorAll('[data-tab]').forEach(b => b.onclick = () => { tab = b.dataset.tab; renderTabs(); renderView(); });
+  }
+
+  /* ---------- Вкладки ---------- */
+  function renderView() {
+    if (tab === 'case') return renderCase();
+    if (tab === 'evidence') return renderEvidence();
+    if (tab === 'feed') { lastCardsSig = ''; return renderFeed(); }
+    if (tab === 'questions') return renderQuestions();
+    if (tab === 'report') return renderReport();
+    if (tab === 'final') return renderFinal();
+  }
+
+  function renderCase() {
+    const t = U.team(teamId);
+    const how = {
+      brief: 'Ждем начала. Сейчас преподаватель расскажет, что случилось.',
+      evidence: 'Изучите улики своей команды. Каждую находку добавляйте в ленту кнопкой «Добавить находку». Лента видна всем командам и на проекторе.',
+      assembly: 'Ответьте на вопросы дела. Для ответов понадобятся находки других команд – смотрите ленту и спрашивайте другие команды.',
+      report: 'Напишите отчет по своему участку: что пошло не так, что делать сейчас и какие правила ввести.',
+      final: 'Дело раскрыто. Посмотрите разгадку.'
+    }[state.stage];
+    view.innerHTML = `
+      <div class="panel">
+        <h2>Что случилось</h2>
+        <p class="lead">${esc(CASE.intro)}</p>
+        <p class="muted">${esc(CASE.about)}</p>
+        <h3>Действующие лица</h3>
+        <ul class="people">${CASE.people.map(p => `<li><b>${esc(p.name)}</b> – ${esc(p.role)}</li>`).join('')}</ul>
+      </div>
+      <div class="panel">
+        <h2>Ваша команда: ${esc(t.source)}</h2>
+        <p class="hint">${esc(how)}</p>
+      </div>`;
+  }
+
+  /* ----- Улики по типам ----- */
+  function whenCell(d, t, date) { return `<td class="when">${esc(U.when(d, t, date))}</td>`; }
+
+  function renderEvidence() {
+    if (state.stage === 'brief') { view.innerHTML = '<p class="empty">Улики откроются, когда начнется первый этап.</p>'; return; }
+    const t = U.team(teamId);
+    view.innerHTML = `<div class="panel"><h2>${esc(t.source)}</h2><p class="hint">${esc(t.hint)}</p></div><div id="ev"></div>`;
+    const box = document.getElementById('ev');
+    ({ laptop, chat, phone, logs, mail, bank })[t.type](box, t.data);
+  }
+
+  function segmented(box, parts, start) {
+    let cur = start || parts[0][0];
+    const draw = () => {
+      box.innerHTML = `<div class="seg" role="group">${parts.map(([k, l]) =>
+        `<button data-k="${k}" aria-pressed="${k === cur}">${l}</button>`).join('')}</div><div class="panel" id="segbody"></div>`;
+      box.querySelectorAll('[data-k]').forEach(b => b.onclick = () => { cur = b.dataset.k; draw(); });
+      parts.find(p => p[0] === cur)[2](document.getElementById('segbody'));
+    };
+    draw();
+  }
+
+  function laptop(box, d) {
+    segmented(box, [
+      ['h', 'История браузера', el => el.innerHTML = `<div class="tablebox"><table class="ev"><thead><tr><th>Когда</th><th>Страница</th><th>Адрес</th></tr></thead><tbody>
+        ${d.history.map(r => `<tr>${whenCell(r.d, r.t)}<td>${esc(r.title)}</td><td class="mono">${esc(r.url)}</td></tr>`).join('')}</tbody></table></div>`],
+      ['dl', 'Загрузки', el => el.innerHTML = `<div class="tablebox"><table class="ev"><thead><tr><th>Когда</th><th>Файл</th><th>Размер</th><th>Примечание</th></tr></thead><tbody>
+        ${d.downloads.map(r => `<tr>${whenCell(r.d, r.t)}<td class="mono">${esc(r.name)}</td><td class="when">${esc(r.size)}</td><td>${esc(r.note)}</td></tr>`).join('')}</tbody></table></div>`],
+      ['av', 'Журнал антивируса', el => el.innerHTML = `<div class="tablebox"><table class="ev"><thead><tr><th>Когда</th><th>Событие</th></tr></thead><tbody>
+        ${d.antivirus.map(r => `<tr>${whenCell(r.d, r.t)}<td class="lvl-${r.level}">${esc(r.text)}</td></tr>`).join('')}</tbody></table></div>`],
+      ['pw', 'Сохраненные пароли', el => {
+        el.innerHTML = `<p class="muted" style="margin-top:0">Пароли, сохраненные в браузере. Нажмите «Показать», чтобы увидеть пароль.</p>
+        <div class="tablebox"><table class="ev"><thead><tr><th>Сайт</th><th>Логин</th><th>Пароль</th><th>Предупреждение браузера</th></tr></thead><tbody>
+        ${d.passwords.map((r, i) => `<tr><td class="mono">${esc(r.site)}</td><td class="mono">${esc(r.login)}</td>
+          <td><span class="mono pw-hidden" data-pw="${i}">••••••••</span> <button class="btn ghost small" data-show="${i}">Показать</button></td>
+          <td class="${r.note ? 'lvl-warn' : ''}">${esc(r.note)}</td></tr>`).join('')}</tbody></table></div>`;
+        el.querySelectorAll('[data-show]').forEach(b => b.onclick = () => {
+          const i = +b.dataset.show, s = el.querySelector(`[data-pw="${i}"]`);
+          const open = b.textContent === 'Показать';
+          s.textContent = open ? d.passwords[i].pass : '••••••••';
+          s.classList.toggle('pw-hidden', !open);
+          b.textContent = open ? 'Скрыть' : 'Показать';
+        });
+      }]
+    ]);
+  }
+
+  function msgHtml(m, mine, showWho) {
+    if (m.system) return `<div class="msg sys">${esc(m.text)} – ${esc(U.when(m.d, m.t))}</div>`;
+    const body = m.voice
+      ? `<div class="voice"><button type="button" aria-label="Расшифровка" data-voice>▶</button><span class="wave"></span><span class="muted">${esc(m.voice)}</span></div>
+         <div class="transcript" hidden><b>Расшифровка:</b> ${esc(m.text)}${m.note ? `<span class="note">${esc(m.note)}</span>` : ''}</div>`
+      : `<div>${esc(m.text)}</div>`;
+    return `<div class="msg ${mine ? 'me' : ''}">${showWho ? `<span class="who">${esc(m.who)}</span>` : ''}<span class="t">${esc(m.t)}</span>${body}</div>`;
+  }
+  function bindVoices(el) {
+    el.querySelectorAll('[data-voice]').forEach(b => b.onclick = () => {
+      const tr = b.closest('.msg').querySelector('.transcript');
+      tr.hidden = !tr.hidden;
+      b.textContent = tr.hidden ? '▶' : '■';
+    });
+  }
+  function withDays(msgs, fn) {
+    let last = null, out = '';
+    msgs.forEach(m => {
+      if (m.d !== last) { out += `<div class="daysep">${esc(U.day(m.d).l)}</div>`; last = m.d; }
+      out += fn(m);
+    });
+    return out;
+  }
+
+  function chat(box, d) {
+    box.innerHTML = `<div class="panel"><p class="muted" style="margin-top:0">Голосовые: нажмите ▶, чтобы прочитать расшифровку.</p><div class="chat">${withDays(d.messages, m => msgHtml(m, false, true))}</div></div>`;
+    bindVoices(box);
+  }
+
+  function phone(box, d) {
+    let cur = 0;
+    const items = d.chats.map((c, i) => ({ k: 'c' + i, l: c.name, sub: c.info.split('.')[0] })).concat([{ k: 'sms', l: 'Смс', sub: 'Сообщения от банков и магазинов' }]);
+    const draw = (k) => {
+      box.innerHTML = `<div class="phone">
+        <div class="list">${items.map(it => `<button data-k="${it.k}" aria-pressed="${it.k === k}"><b>${esc(it.l)}</b><small>${esc(it.sub)}</small></button>`).join('')}</div>
+        <div class="panel" id="pv"></div></div>`;
+      box.querySelectorAll('[data-k]').forEach(b => b.onclick = () => draw(b.dataset.k));
+      const pv = document.getElementById('pv');
+      if (k === 'sms') {
+        pv.innerHTML = `<h2>Смс</h2>${d.sms.map(s => `<div class="sms"><div class="muted" style="font-size:13px">${esc(s.from)}, ${esc(U.when(s.d, s.t))}</div>${esc(s.text)}</div>`).join('')}`;
+      } else {
+        const c = d.chats[+k.slice(1)];
+        pv.innerHTML = `<h2>${esc(c.name)}</h2><div class="profile">${esc(c.info)}</div><div class="chat">${withDays(c.messages, m => msgHtml(m, m.me, false))}</div>`;
+        bindVoices(pv);
+      }
+    };
+    draw('c' + cur);
+  }
+
+  function logs(box, d) {
+    box.innerHTML = `
+      <div class="panel"><h2>Журнал входов за неделю</h2><div class="tablebox"><table class="ev"><thead><tr><th>Когда</th><th>Сервис</th><th>Учетная запись</th><th>Событие</th><th>Устройство</th><th>Место</th><th>IP-адрес</th></tr></thead><tbody>
+      ${d.rows.map(r => `<tr>${whenCell(r.d, r.t)}<td>${esc(r.service)}</td><td class="mono">${esc(r.account)}</td><td>${esc(r.event)}</td><td>${esc(r.device)}</td><td>${esc(r.place)}</td><td class="mono">${esc(r.ip)}</td></tr>`).join('')}
+      </tbody></table></div></div>
+      <div class="panel"><h2>Активные сеансы мессенджера Дани (на сегодня)</h2><div class="tablebox"><table class="ev"><thead><tr><th>Устройство</th><th>Место</th><th>Активен</th></tr></thead><tbody>
+      ${d.sessions.map(s => `<tr><td>${esc(s.device)}</td><td>${esc(s.place)}</td><td>${esc(s.since)}</td></tr>`).join('')}</tbody></table></div></div>
+      <div class="panel"><h2>Настройки безопасности</h2><ul>${d.settings.map(s => `<li>${esc(s)}</li>`).join('')}</ul></div>`;
+  }
+
+  function mail(box, d) {
+    const order = d.letters.map((l, i) => i).reverse();
+    const draw = (i) => {
+      const L = d.letters[i];
+      box.innerHTML = `<div class="mail">
+        <div class="inbox">${order.map(j => { const x = d.letters[j]; return `<button data-i="${j}" aria-pressed="${j === i}">
+          <div class="from">${esc(x.name)}</div><div class="subj">${esc(x.subject)}</div><div class="w">${esc(U.when(x.d, x.t, x.date))}</div></button>`; }).join('')}</div>
+        <div class="panel letter">
+          <h2>${esc(L.subject)}</h2>
+          <div class="head">
+            <span>От</span><span><b>${esc(L.name)}</b> <span class="mono">&lt;${esc(L.from)}&gt;</span></span>
+            <span>Кому</span><span class="mono">buh@pion-pong.test</span>
+            <span>Ответить</span><span class="mono">${esc(L.from)}</span>
+            <span>Получено</span><span>${esc(U.when(L.d, L.t, L.date))}</span>
+          </div>
+          <div class="body">${U.nl2br(L.body)}</div>
+          ${L.attach.map(a => `<span class="attach">📎 ${esc(a)}</span>`).join('')}
+        </div></div>`;
+      box.querySelectorAll('[data-i]').forEach(b => b.onclick = () => draw(+b.dataset.i));
+    };
+    draw(order[0]);
+  }
+
+  function bank(box, d) {
+    box.innerHTML = `
+      <div class="panel"><h2>Выписка по счету «Пион-Понга»</h2><div class="tablebox"><table class="ev"><thead><tr><th>Когда</th><th>Сумма, ₽</th><th>Получатель или плательщик</th><th>Счет</th><th>Назначение</th></tr></thead><tbody>
+      ${d.statement.map(r => `<tr>${whenCell(r.d, r.t, r.date)}<td class="when ${r.dir === '+' ? 'lvl-ok' : ''}">${r.dir === '+' ? '+' : '−'}${esc(r.sum)}</td><td>${esc(r.who)}</td><td class="mono">${esc(r.acc)}</td><td>${esc(r.purpose)}</td></tr>`).join('')}
+      </tbody></table></div></div>
+      <div class="panel"><h2>Переписка с банком</h2>${d.letters.map(l => `<div class="sms"><div class="muted" style="font-size:13px">${esc(l.from)}, ${esc(U.when(l.d, l.t))}</div>${esc(l.text)}</div>`).join('')}</div>
+      <div class="panel"><h2>Памятка банка: как читать номер счета</h2><ul>${d.memo.map(m => `<li>${esc(m)}</li>`).join('')}</ul></div>`;
+  }
+
+  /* ----- Лента ----- */
+  function cardHtml(c, mineControls) {
+    const t = U.team(c.team);
+    return `<div class="card ${c.status === 'key' ? 'key' : ''}" style="--c:${t.color}">
+      <div class="meta"><span>${esc(U.day(c.day).s)}, ${U.hhmm(c.minutes)}</span><span>Команда ${c.team}</span></div>
+      <div class="what">${esc(c.what)}</div>
+      <div class="proof">${esc(c.proof)}</div>
+      ${c.technique ? `<span class="tech">${esc(c.technique)}</span>` : ''}
+      ${mineControls && c.team === teamId && state.stage !== 'final' ? `<div style="margin-top:8px"><button class="btn ghost small" data-hide="${c.id}">Убрать из ленты</button></div>` : ''}
+    </div>`;
+  }
+
+  function renderFeed() {
+    const vis = cards.filter(c => c.status !== 'hidden');
+    const sig = JSON.stringify(vis.map(c => [c.id, c.status]));
+    if (sig === lastCardsSig && view.querySelector('.feed')) return;
+    lastCardsSig = sig;
+    if (!vis.length) { view.innerHTML = '<div class="panel"><h2>Лента дела</h2><p class="empty">Пока нет ни одной находки. Добавьте первую кнопкой «Добавить находку».</p></div>'; return; }
+    let out = '', last = null;
+    vis.forEach(c => {
+      if (c.day !== last) { out += `<div class="dayhead">${esc(U.day(c.day).l)}</div>`; last = c.day; }
+      out += cardHtml(c, true);
+    });
+    view.innerHTML = `<div class="panel"><h2>Лента дела</h2><p class="muted" style="margin-top:0">Находки всех команд по времени. Ключевые улики преподаватель подсвечивает маркером.</p><div class="feed">${out}</div></div>`;
+    view.querySelectorAll('[data-hide]').forEach(b => b.onclick = async () => {
+      if (!confirm('Убрать эту находку из ленты?')) return;
+      await DB.setCardStatus(+b.dataset.hide, 'hidden');
+      await refresh(true);
+    });
+  }
+
+  /* ----- Ответы ----- */
+  async function loadAnswers() {
+    const rows = await DB.answers(teamId);
+    const m = {};
+    (rows || []).forEach(r => m[r.kind] = r.body);
+    return m;
+  }
+  const stamp = () => new Date().toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' });
+
+  async function renderQuestions() {
+    view.innerHTML = `<div class="panel"><h2>Вопросы дела</h2>
+      <p class="hint">Для ответов нужны улики других команд – смотрите «Ленту дела» и спрашивайте. Ответы видят только ваша команда и преподаватель. Если в команде несколько устройств – пишите с одного.</p>
+      <form id="qf">${CASE.questions.map((q, i) => `<label class="field"><span>${i + 1}. ${esc(q)}</span><textarea name="q${i + 1}"></textarea></label>`).join('')}
+      <button class="btn peony" type="submit">Сохранить ответы</button><span class="saved" id="qsaved"></span></form></div>`;
+    const a = await loadAnswers();
+    const f = document.getElementById('qf');
+    CASE.questions.forEach((q, i) => { f.elements['q' + (i + 1)].value = a['q' + (i + 1)] || ''; });
+    f.onsubmit = async e => {
+      e.preventDefault();
+      try {
+        for (let i = 1; i <= CASE.questions.length; i++) await DB.saveAnswer(teamId, 'q' + i, f.elements['q' + i].value.trim());
+        document.getElementById('qsaved').textContent = 'Сохранено в ' + stamp();
+      } catch (err) { alert('Не удалось сохранить. Проверьте интернет и нажмите еще раз.'); }
+    };
+  }
+
+  async function renderReport() {
+    const t = U.team(teamId);
+    view.innerHTML = `<div class="panel"><h2>Отчет по участку: ${esc(t.source)}</h2>
+      <p class="hint">Пишите только про свой участок – про то, что видно в ваших уликах.</p>
+      <form id="rf">${CASE.reportFields.map(r => `<label class="field"><span>${esc(r.l)}</span><textarea name="${r.k}"></textarea></label>`).join('')}
+      <button class="btn peony" type="submit">Сохранить отчет</button><span class="saved" id="rsaved"></span></form></div>`;
+    const a = await loadAnswers();
+    const f = document.getElementById('rf');
+    let saved = {};
+    try { saved = JSON.parse(a.report || '{}'); } catch (e) {}
+    CASE.reportFields.forEach(r => f.elements[r.k].value = saved[r.k] || '');
+    f.onsubmit = async e => {
+      e.preventDefault();
+      const body = {};
+      CASE.reportFields.forEach(r => body[r.k] = f.elements[r.k].value.trim());
+      try {
+        await DB.saveAnswer(teamId, 'report', JSON.stringify(body));
+        document.getElementById('rsaved').textContent = 'Сохранено в ' + stamp();
+      } catch (err) { alert('Не удалось сохранить. Проверьте интернет и нажмите еще раз.'); }
+    };
+  }
+
+  function renderFinal() {
+    view.innerHTML = `
+      <div class="panel"><h2>Как все было на самом деле</h2>
+        <ol class="chain">${CASE.chain.map(s => `<li><span class="when">${esc(U.day(s.d).l)}, ${esc(s.t)}</span><div>${esc(s.text)}<span class="tech">${esc(s.tech)}</span></div></li>`).join('')}</ol></div>
+      <div class="panel"><h2>Где цепочку можно было оборвать</h2>
+        <div class="tablebox"><table class="ev"><tbody>${CASE.breakpoints.map(b => `<tr><td style="font-weight:600;width:30%">${esc(b[0])}</td><td>${esc(b[1])}</td></tr>`).join('')}</tbody></table></div></div>`;
+  }
+
+  /* ----- Вбросы ----- */
+  function renderInjects() {
+    const sig = `${state.inject1}|${state.inject2}|${state.stage === 'final'}`;
+    if (sig === lastInjects) return;
+    lastInjects = sig;
+    const box = document.getElementById('injects');
+    let html = '';
+    if (state.inject2 && state.stage !== 'final') {
+      const j = CASE.inject2;
+      html += `<details class="inject" open><summary><h2>${esc(j.title)}</h2></summary><div class="muted">${esc(j.when)}</div>
+        <p>${esc(j.text)}</p><div class="smsbox">💬 ${esc(j.sms)}</div><p><b>${esc(j.question)}</b></p>
+        <form id="i2f"><label class="field"><span>Ответ команды</span><textarea name="a"></textarea></label>
+        <button class="btn peony" type="submit">Отправить ответ</button><span class="saved" id="i2saved"></span></form></details>`;
+    }
+    if (state.inject1 && state.stage !== 'final') {
+      const j = CASE.inject1;
+      html += `<details class="inject" open><summary><h2>${esc(j.title)}</h2></summary><div class="muted">${esc(j.when)}</div>
+        <ul>${j.items.map(i => `<li>${esc(i)}</li>`).join('')}</ul><p><b>${esc(j.question)}</b></p></details>`;
+    }
+    box.innerHTML = html;
+    const f = document.getElementById('i2f');
+    if (f) {
+      loadAnswers().then(a => { if (!f.elements.a.value) f.elements.a.value = a.inject2 || ''; }).catch(() => {});
+      f.onsubmit = async e => {
+        e.preventDefault();
+        try {
+          await DB.saveAnswer(teamId, 'inject2', f.elements.a.value.trim());
+          document.getElementById('i2saved').textContent = 'Отправлено в ' + stamp();
+        } catch (err) { alert('Не удалось отправить. Проверьте интернет и нажмите еще раз.'); }
+      };
+    }
+  }
+
+  /* ----- Форма находки ----- */
+  const dlg = document.getElementById('card-dialog');
+  const form = document.getElementById('card-form');
+  form.elements.day.innerHTML = CASE.days.map(d => `<option value="${d.v}">${esc(d.l)}</option>`).join('');
+  form.elements.technique.innerHTML = '<option value="">– выберите –</option>' + CASE.techniques.map(t => `<option>${esc(t)}</option>`).join('');
+  document.getElementById('fab').onclick = () => {
+    form.reset();
+    form.elements.day.value = '0';
+    document.getElementById('card-err').hidden = true;
+    dlg.showModal();
+  };
+  document.getElementById('card-cancel').onclick = () => dlg.close();
+  form.onsubmit = async e => {
+    e.preventDefault();
+    const f = form.elements;
+    const minutes = U.toMin(f.time.value);
+    const err = document.getElementById('card-err');
+    if (minutes == null || !f.what.value.trim() || !f.proof.value.trim() || !f.technique.value) {
+      err.textContent = 'Заполните все поля: день, время, что произошло, доказательство и прием.';
+      err.hidden = false; return;
+    }
+    const btn = document.getElementById('card-submit');
+    btn.disabled = true;
+    try {
+      await DB.addCard({ team: teamId, day: +f.day.value, minutes, what: f.what.value.trim(), proof: f.proof.value.trim(), technique: f.technique.value });
+      dlg.close();
+      await refresh(true);
+      if (tab !== 'feed' && tab !== 'evidence') { tab = 'feed'; renderTabs(); renderView(); }
+    } catch (ex) {
+      err.textContent = 'Не удалось отправить. Проверьте интернет и попробуйте еще раз.';
+      err.hidden = false;
+    }
+    btn.disabled = false;
+  };
+
+  /* ----- Таймер ----- */
+  setInterval(() => {
+    const el = document.getElementById('timer');
+    const left = U.timerLeft(state);
+    el.hidden = left == null || !teamId;
+    if (left != null) { el.textContent = U.fmtLeft(left); el.classList.toggle('low', left <= 60); }
+  }, 1000);
+
+  /* ----- Обновление ----- */
+  async function refresh(force) {
+    if (!teamId) return;
+    const [s, c] = await Promise.all([DB.state(), DB.cards()]);
+    state = s; cards = c || [];
+    renderHeader();
+    if (state.stage !== lastStage) {
+      lastStage = state.stage;
+      tab = DEFAULT_TAB[state.stage] || 'case';
+      renderTabs();
+      renderView();
+    } else if (force && tab === 'feed') {
+      lastCardsSig = ''; renderFeed();
+    } else if (tab === 'feed') {
+      renderFeed();
+    }
+    renderInjects();
+  }
+
+  if (!teamId || !U.team(teamId)) { teamId = null; renderPicker(); }
+  U.poll(() => teamId ? refresh(false) : Promise.resolve(), 2000);
+})();
+</script>
+</body>
+</html>

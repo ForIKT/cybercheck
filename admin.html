@@ -1,0 +1,189 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Дело № 148 – преподаватель</title>
+<meta name="robots" content="noindex">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Golos+Text:wght@400;500;600;700&family=PT+Mono&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="style.css">
+<style>
+  .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+  @media (max-width: 860px) { .grid2 { grid-template-columns: 1fr; } }
+  .btnrow { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+  .btn.on { background: var(--peony); border-color: var(--peony); color: #fff; }
+  .adm-card { display: grid; grid-template-columns: 1fr auto; gap: 10px; align-items: start; }
+  .adm-card .acts { display: flex; flex-direction: column; gap: 6px; }
+  .ans-team { border-left: 6px solid var(--c); padding-left: 12px; margin-bottom: 18px; }
+  .ans-team dt { font-weight: 600; font-size: 14px; color: var(--muted); margin-top: 8px; }
+  .ans-team dd { margin: 2px 0 0; white-space: pre-wrap; }
+  details summary { cursor: pointer; font-weight: 700; font-size: 18px; }
+  .keylist li { margin-bottom: 4px; }
+  .links a { color: var(--ink); font-weight: 600; }
+</style>
+</head>
+<body>
+<header class="top">
+  <div class="wrap">
+    <div class="brand"><span class="peony" aria-hidden="true"></span><span class="case">Дело № 148</span><span style="color:#AEB7C4;font-weight:500">панель преподавателя</span></div>
+    <span class="spacer"></span>
+    <span class="chip" id="stage-chip">…</span>
+    <span class="timer" id="timer" hidden></span>
+  </div>
+</header>
+<main><div class="wrap" id="root"></div></main>
+
+<script src="config.js"></script>
+<script src="data.js"></script>
+<script src="common.js"></script>
+<script>
+(function () {
+  if (!U.configOk()) return;
+  const CASE = window.CASE, DB = U.DB, esc = U.esc, root = document.getElementById('root');
+  const ss = { get(k) { try { return sessionStorage.getItem(k); } catch (e) { return null; } }, set(k, v) { try { sessionStorage.setItem(k, v); } catch (e) {} } };
+  let state = null, cards = [], answers = [], sigCards = '', sigAns = '';
+
+  function login() {
+    root.innerHTML = `<div class="panel" style="max-width:420px;margin:40px auto">
+      <h2>Вход для преподавателя</h2>
+      <form id="lf"><label class="field"><span>Пароль</span><input type="password" name="p" autocomplete="current-password" required></label>
+      <button class="btn peony" type="submit">Войти</button> <span id="lerr" style="color:var(--bad)"></span></form></div>`;
+    document.getElementById('lf').onsubmit = e => {
+      e.preventDefault();
+      if (e.target.elements.p.value === window.CFG.adminPassword) { ss.set('inv_admin', '1'); start(); }
+      else document.getElementById('lerr').textContent = 'Неверный пароль';
+    };
+  }
+
+  function layout() {
+    const base = new URL('./', location.href).href;
+    root.innerHTML = `
+      <div class="panel links">
+        <h2>Ссылки</h2>
+        <p style="margin:0">Для студентов: <span class="mono">${esc(base)}</span><br>
+        Для проектора: <a href="screen.html" target="_blank" rel="noopener">открыть экран</a> (откройте на компьютере с проектором)</p>
+      </div>
+      <div class="grid2">
+        <div class="panel"><h2>Ход пары</h2><div class="btnrow" id="stages"></div>
+          <p class="muted" style="margin-bottom:0">Брифинг – улики скрыты. Этап 1 – команды видят улики и добавляют находки. Этап 2 – открываются вопросы дела. Этап 3 – открывается отчет. Финал – разгадка у всех.</p></div>
+        <div class="panel"><h2>Таймер</h2><div class="btnrow" id="timerbtns">
+          ${[5, 10, 15, 20, 30].map(m => `<button class="btn ghost small" data-min="${m}">${m} мин</button>`).join('')}
+          <button class="btn ghost small" data-min="0">Убрать</button></div></div>
+      </div>
+      <div class="grid2">
+        <div class="panel"><h2>Вбросы</h2><div class="btnrow" id="injects"></div>
+          <p class="muted" style="margin-bottom:0">Вброс появляется у всех команд и сразу выводится на проектор.</p></div>
+        <div class="panel"><h2>Что на проекторе</h2><div class="btnrow" id="screens"></div></div>
+      </div>
+      <div class="panel"><h2>Находки команд</h2><p class="muted" style="margin-top:0">«Ключевая» подсвечивает находку маркером у всех. «Скрыть» убирает ошибочную находку из ленты.</p><div id="cards" class="feed"></div></div>
+      <div class="panel"><h2>Ответы команд</h2><div id="answers"></div></div>
+      <div class="panel"><details><summary>Подсказки преподавателю: ключ к делу</summary><div id="key"></div></details></div>
+      <div class="panel"><h2>Новая группа</h2><p class="muted">Удаляет все находки и ответы и возвращает игру к брифингу. Используйте перед парой со следующей группой.</p>
+        <button class="btn" id="reset">Сбросить игру</button></div>`;
+
+    document.getElementById('timerbtns').querySelectorAll('[data-min]').forEach(b => b.onclick = async () => {
+      const m = +b.dataset.min;
+      await DB.setState({ timer_end: m ? new Date(Date.now() + m * 60000).toISOString() : null });
+      tick();
+    });
+    document.getElementById('reset').onclick = async () => {
+      if (!confirm('Удалить все находки и ответы и начать заново?')) return;
+      await DB.resetAll(); sigCards = sigAns = ''; tick();
+    };
+    renderKey();
+  }
+
+  function renderControls() {
+    document.getElementById('stage-chip').textContent = U.stageLabel(state.stage);
+    const st = document.getElementById('stages');
+    st.innerHTML = U.STAGES.map(s => `<button class="btn ghost small ${state.stage === s.k ? 'on' : ''}" data-s="${s.k}">${s.l}</button>`).join('');
+    st.querySelectorAll('[data-s]').forEach(b => b.onclick = async () => { await DB.setState({ stage: b.dataset.s }); tick(); });
+
+    const inj = document.getElementById('injects');
+    inj.innerHTML = `
+      <button class="btn ghost small ${state.inject1 ? 'on' : ''}" data-i="1">${state.inject1 ? 'Вброс 1 включен' : 'Включить вброс 1: жалобы клиентов'}</button>
+      <button class="btn ghost small ${state.inject2 ? 'on' : ''}" data-i="2">${state.inject2 ? 'Вброс 2 включен' : 'Включить вброс 2: звонок из банка'}</button>`;
+    inj.querySelectorAll('[data-i]').forEach(b => b.onclick = async () => {
+      const k = 'inject' + b.dataset.i, on = !state[k];
+      const patch = { [k]: on };
+      if (on) patch.screen = k; else if (state.screen === k) patch.screen = 'board';
+      await DB.setState(patch); tick();
+    });
+
+    const sc = document.getElementById('screens');
+    const opts = [['board', 'Доска находок'], ['inject1', 'Вброс 1'], ['inject2', 'Вброс 2']];
+    sc.innerHTML = opts.map(([k, l]) => `<button class="btn ghost small ${(state.screen || 'board') === k ? 'on' : ''}" data-sc="${k}">${l}</button>`).join('') +
+      `<span class="muted" style="font-size:14px">На брифинге проектор показывает вводную, в финале – разгадку.</span>`;
+    sc.querySelectorAll('[data-sc]').forEach(b => b.onclick = async () => { await DB.setState({ screen: b.dataset.sc }); tick(); });
+  }
+
+  function renderCards() {
+    const sig = JSON.stringify(cards.map(c => [c.id, c.status]));
+    if (sig === sigCards) return;
+    sigCards = sig;
+    const box = document.getElementById('cards');
+    if (!cards.length) { box.innerHTML = '<p class="empty">Пока нет находок.</p>'; return; }
+    const list = cards.slice().sort((a, b) => b.id - a.id);
+    box.innerHTML = list.map(c => { const t = U.team(c.team); return `<div class="card adm-card ${c.status === 'key' ? 'key' : ''} ${c.status === 'hidden' ? 'hidden-card' : ''}" style="--c:${t.color}">
+      <div><div class="meta"><span>${esc(U.day(c.day).s)}, ${U.hhmm(c.minutes)}</span><span>Команда ${c.team}</span></div>
+      <div class="what">${esc(c.what)}</div><div class="proof">${esc(c.proof)}</div>${c.technique ? `<span class="tech">${esc(c.technique)}</span>` : ''}</div>
+      <div class="acts">
+        <button class="btn ghost small" data-key="${c.id}">${c.status === 'key' ? 'Снять маркер' : 'Ключевая'}</button>
+        <button class="btn ghost small" data-hid="${c.id}">${c.status === 'hidden' ? 'Вернуть' : 'Скрыть'}</button>
+      </div></div>`; }).join('');
+    box.querySelectorAll('[data-key]').forEach(b => b.onclick = async () => {
+      const c = cards.find(x => x.id === +b.dataset.key);
+      await DB.setCardStatus(c.id, c.status === 'key' ? 'new' : 'key'); sigCards = ''; tick();
+    });
+    box.querySelectorAll('[data-hid]').forEach(b => b.onclick = async () => {
+      const c = cards.find(x => x.id === +b.dataset.hid);
+      await DB.setCardStatus(c.id, c.status === 'hidden' ? 'new' : 'hidden'); sigCards = ''; tick();
+    });
+  }
+
+  function renderAnswers() {
+    const sig = JSON.stringify(answers.map(a => [a.team, a.kind, a.body]));
+    if (sig === sigAns) return;
+    sigAns = sig;
+    const box = document.getElementById('answers');
+    box.innerHTML = CASE.teams.map(t => {
+      const a = {}; answers.filter(x => x.team === t.id).forEach(x => a[x.kind] = x.body);
+      let rep = {}; try { rep = JSON.parse(a.report || '{}'); } catch (e) {}
+      const rows = [];
+      CASE.questions.forEach((q, i) => { if (a['q' + (i + 1)]) rows.push([`${i + 1}. ${q}`, a['q' + (i + 1)]]); });
+      if (a.inject2) rows.push(['Вброс 2: звонок из банка', a.inject2]);
+      CASE.reportFields.forEach(r => { if (rep[r.k]) rows.push(['Отчет: ' + r.l, rep[r.k]]); });
+      return `<div class="ans-team" style="--c:${t.color}"><b>Команда ${t.id}: ${esc(t.source)}</b>
+        ${rows.length ? `<dl>${rows.map(r => `<dt>${esc(r[0])}</dt><dd>${esc(r[1])}</dd>`).join('')}</dl>` : '<div class="muted">Ответов пока нет</div>'}</div>`;
+    }).join('');
+  }
+
+  function renderKey() {
+    const k = CASE.key;
+    document.getElementById('key').innerHTML = `
+      <h3>Ответы на вопросы дела</h3><ol class="keylist">${CASE.questions.map((q, i) => `<li><b>${esc(q)}</b><br>${esc(k.questions[i])}</li>`).join('')}</ol>
+      <h3>Вброс 2</h3><p>${esc(k.inject2)}</p>
+      <h3>Ключевые улики по командам</h3>
+      ${CASE.teams.map(t => `<div class="ans-team" style="--c:${t.color}"><b>Команда ${t.id}: ${esc(t.source)}</b><ul class="keylist">${k.evidence[t.id].map(e => `<li>${esc(e)}</li>`).join('')}</ul></div>`).join('')}`;
+  }
+
+  async function tick() {
+    const [s, c, a] = await Promise.all([DB.state(), DB.cards(), DB.answers()]);
+    state = s; cards = c || []; answers = a || [];
+    renderControls(); renderCards(); renderAnswers();
+  }
+
+  setInterval(() => {
+    const el = document.getElementById('timer'), left = U.timerLeft(state);
+    el.hidden = left == null;
+    if (left != null) { el.textContent = U.fmtLeft(left); el.classList.toggle('low', left <= 60); }
+  }, 1000);
+
+  function start() { layout(); U.poll(tick, 2500); }
+  if (ss.get('inv_admin') === '1') start(); else login();
+})();
+</script>
+</body>
+</html>

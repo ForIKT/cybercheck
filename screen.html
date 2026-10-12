@@ -1,0 +1,119 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Дело № 148 – экран</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Golos+Text:wght@400;500;600;700&family=PT+Mono&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="style.css">
+<style>
+  body { font-size: 18px; }
+  .wide { max-width: none; padding: 0 24px; }
+  .legend { display: flex; gap: 16px; flex-wrap: wrap; padding: 12px 24px; background: var(--paper); border-bottom: 1px solid var(--line); font-size: 15px; }
+  .legend span { display: inline-flex; align-items: center; gap: 6px; }
+  .legend i { width: 14px; height: 14px; border-radius: 3px; display: inline-block; }
+  .board { display: grid; grid-template-columns: repeat(7, minmax(180px, 1fr)); gap: 12px; padding: 16px 24px 24px; overflow-x: auto; }
+  .col h3 { font-size: 17px; padding: 6px 2px 10px; border-bottom: 3px solid var(--ink); margin-bottom: 10px; display: flex; justify-content: space-between; }
+  .col h3 small { color: var(--muted); font-weight: 500; }
+  .col .stack { display: grid; gap: 8px; }
+  .col .card { font-size: 14px; }
+  .big { padding: 28px 24px; }
+  .big h1 { font-size: 44px; margin-bottom: 12px; }
+  .big .lead { font-size: 24px; max-width: 60ch; }
+  .join { display: flex; gap: 28px; align-items: center; margin-top: 24px; background: var(--paper); border: 1px solid var(--line); border-radius: 12px; padding: 20px; width: fit-content; }
+  .join .url { font-size: 26px; font-weight: 700; word-break: break-all; }
+  #qr img, #qr canvas { display: block; }
+  .inject.huge { font-size: 24px; max-width: 1100px; margin: 28px auto; padding: 28px 32px; }
+  .inject.huge h2 { font-size: 34px; }
+  .count { font-size: 15px; color: var(--muted); padding: 0 24px; }
+</style>
+</head>
+<body>
+<header class="top">
+  <div class="wrap wide">
+    <div class="brand"><span class="peony" aria-hidden="true"></span><span class="case">Дело № 148</span><span style="color:#AEB7C4;font-weight:500">«Пион-Понг»</span></div>
+    <span class="spacer"></span>
+    <span class="chip" id="stage-chip">…</span>
+    <span class="timer" id="timer" hidden></span>
+  </div>
+</header>
+<div id="root"></div>
+
+<script src="config.js"></script>
+<script src="data.js"></script>
+<script src="common.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
+<script>
+(function () {
+  if (!U.configOk()) return;
+  const CASE = window.CASE, esc = U.esc, root = document.getElementById('root');
+  let state = null, cards = [], lastSig = '';
+  const joinUrl = new URL('./', location.href).href;
+
+  function legend() {
+    return `<div class="legend">${CASE.teams.map(t => `<span><i style="background:${t.color}"></i>Команда ${t.id}: ${esc(t.source)}</span>`).join('')}</div>`;
+  }
+
+  function brief() {
+    root.innerHTML = `<div class="big">
+      <h1>Что случилось с «Пион-Понгом»</h1>
+      <p class="lead">${esc(CASE.intro)}</p>
+      <div class="join"><div id="qr"></div><div><div class="muted">Откройте на телефоне или ноутбуке и выберите свою команду</div><div class="url">${esc(joinUrl)}</div></div></div>
+      </div>${legend()}`;
+    try { new QRCode(document.getElementById('qr'), { text: joinUrl, width: 180, height: 180 }); } catch (e) { document.getElementById('qr').remove(); }
+  }
+
+  function board() {
+    const vis = cards.filter(c => c.status !== 'hidden');
+    const cols = CASE.days.map(d => {
+      const list = vis.filter(c => c.day === d.v);
+      return `<div class="col"><h3>${esc(d.v === 7 ? 'Пн, след. неделя' : d.l)}<small>${list.length || ''}</small></h3><div class="stack">
+        ${list.map(c => { const t = U.team(c.team); return `<div class="card ${c.status === 'key' ? 'key' : ''}" style="--c:${t.color}">
+          <div class="meta"><span>${U.hhmm(c.minutes)}</span><span>Команда ${c.team}</span></div>
+          <div class="what">${esc(c.what)}</div>
+          ${c.technique ? `<span class="tech">${esc(c.technique)}</span>` : ''}</div>`; }).join('')}
+      </div></div>`;
+    }).join('');
+    root.innerHTML = legend() + `<p class="count">Находок в ленте: ${vis.length}</p><div class="board">${cols}</div>`;
+  }
+
+  function inject(n) {
+    const j = n === 1 ? CASE.inject1 : CASE.inject2;
+    root.innerHTML = n === 1
+      ? `<section class="inject huge"><h2>${esc(j.title)}</h2><div class="muted">${esc(j.when)}</div><ul>${j.items.map(i => `<li>${esc(i)}</li>`).join('')}</ul><p><b>${esc(j.question)}</b></p></section>`
+      : `<section class="inject huge"><h2>${esc(j.title)}</h2><div class="muted">${esc(j.when)}</div><p>${esc(j.text)}</p><div class="smsbox">💬 ${esc(j.sms)}</div><p><b>${esc(j.question)}</b></p></section>`;
+  }
+
+  function final() {
+    root.innerHTML = `<div class="wrap" style="padding-top:24px">
+      <div class="panel"><h2 style="font-size:28px">Как все было на самом деле</h2>
+      <ol class="chain">${CASE.chain.map(s => `<li><span class="when">${esc(U.day(s.d).l)}, ${esc(s.t)}</span><div>${esc(s.text)}<span class="tech">${esc(s.tech)}</span></div></li>`).join('')}</ol></div>
+      <div class="panel"><h2 style="font-size:28px">Где цепочку можно было оборвать</h2>
+      <table class="ev"><tbody>${CASE.breakpoints.map(b => `<tr><td style="font-weight:600;width:28%">${esc(b[0])}</td><td>${esc(b[1])}</td></tr>`).join('')}</tbody></table></div></div>`;
+  }
+
+  async function refresh() {
+    const [s, c] = await Promise.all([U.DB.state(), U.DB.cards()]);
+    state = s; cards = c || [];
+    document.getElementById('stage-chip').textContent = U.stageLabel(state.stage);
+    const mode = state.stage === 'brief' ? 'brief' : state.stage === 'final' ? 'final'
+      : state.screen === 'inject1' ? 'i1' : state.screen === 'inject2' ? 'i2' : 'board';
+    const sig = mode + (mode === 'board' ? JSON.stringify(cards.map(x => [x.id, x.status])) : '');
+    if (sig === lastSig) return;
+    lastSig = sig;
+    ({ brief, final, board, i1: () => inject(1), i2: () => inject(2) })[mode]();
+  }
+
+  setInterval(() => {
+    const el = document.getElementById('timer'), left = U.timerLeft(state);
+    el.hidden = left == null;
+    if (left != null) { el.textContent = U.fmtLeft(left); el.classList.toggle('low', left <= 60); }
+  }, 1000);
+
+  U.poll(refresh, 2000);
+})();
+</script>
+</body>
+</html>
